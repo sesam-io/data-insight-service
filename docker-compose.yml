@@ -6,6 +6,6 @@ services:
     ports:
       - "5000:5000"
     environment:
-      URL:  ${DEV_URL}
+      URL:  ${DEV_URL}/datasets
       LOG_LEVEL: "DEBUG"
       JWT: ${JWT}

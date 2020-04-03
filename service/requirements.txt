@@ -1,4 +1,4 @@
 requests
 Flask==1.0.2
 sesamutils
-pytest
+pandas

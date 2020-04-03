@@ -128,3 +128,4 @@ dmypy.json
 # Pyre type checker
 .pyre/
 data-insights-service.code-workspace
+.vscode/settings.json

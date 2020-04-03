@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
-
 import json
+import pandas as pd
 
 from flask import Flask, request, jsonify, Response, abort
 
@@ -26,7 +26,12 @@ if not config.validate():
 
 JWT = config.JWT
 URL = config.URL
-AUTH = f"Bearer: {JWT}"
+HEADER = {'Authorization': f'Bearer {JWT}'}
+
+def cell_len(x):
+    if isinstance(x,str) or isinstance(x,list):
+        return len(str(x))
+    return x
 
 def stream_as_json(generator_function):
     """Helper generator to support streaming with flask to Sesam"""
@@ -48,16 +53,39 @@ def get_url():
         else:
             unix_time_update_date = request.args.get('since')
             logger.debug(f"since value sent from sesam: {unix_time_update_date}")
-        with requests.Session() as session:
-            # session.auth = AUTH
+        with requests.Session() as session: # For streaming with generator
+            session.headers.update(HEADER)
             resp = session.get(URL, timeout=180)
-            return Response(stream_as_json([resp.json()]), mimetype='application/json; charset=utf-8')
+            data = [{"data": resp.json()}]
+            logger.debug(resp.json())
+            return Response(json.dumps(data), mimetype='application/json; charset=utf-8')
+            # return Response(stream_as_json(data), mimetype='application/json; charset=utf-8')
     except Timeout as e:
         logger.error(f"Timeout issue while fetching {e}")
     except ConnectionError as e:
         logger.error(f"ConnectionError issue while fetching {e}")
     except Exception as e:
         logger.error(f"Issue while fetching {e}")
+
+@server.route("/stats",methods=["POST"]) 
+def post_stats():
+    payload = request.json
+    data = pd.json_normalize(payload)
+    dataColumns = list(data.columns)
+    map_tmp = list(map(lambda s:list(str.split(s,'.')),dataColumns))
+    map_tmp = pd.DataFrame(map_tmp).fillna('')
+    data.columns = pd.MultiIndex.from_frame(map_tmp)
+    data_stat = data.applymap(cell_len).describe(include="all").T
+    data_stat['type'] =[type(c).__name__ for c in data.iloc[0]]
+    logger.debug(f'post_stats: {data_stat.to_json(orient="index")}')
+    return Response('[\n'+data_stat.to_json(orient="index")+'\n]', mimetype='application/json; charset=utf-8')
+
+@server.route("/flaten",methods=["POST"]) 
+def post_flaten():
+    payload = request.json
+    data = pd.json_normalize(payload,sep='~')
+    return Response(data.to_json(orient="records"), mimetype='application/json; charset=utf-8')
+
 
 if __name__ == "__main__":
     serve(server)

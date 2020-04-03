@@ -1,6 +1,6 @@
-FROM python:3-alpine
-RUN apk update&&\
-    apk add --no-cache tini
+FROM python:3.7
+RUN apt-get update&&\
+    apt-get install tini
 
 RUN pip install --upgrade pip
 
@@ -12,5 +12,5 @@ WORKDIR /service/
 
 EXPOSE 5000
 
-ENTRYPOINT ["/sbin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["python3", "insight.py"]
