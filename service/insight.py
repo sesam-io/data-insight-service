@@ -3,6 +3,13 @@ from datetime import datetime
 import json
 import pandas as pd
 
+import dash
+import dash_html_components as html
+import dash_core_components as dcc
+import dash_table
+
+from dash.dependencies import Input, Output
+
 from flask import Flask, request, jsonify, Response, abort
 
 import requests
@@ -11,8 +18,14 @@ from requests.exceptions import Timeout
 from sesamutils import sesam_logger, VariablesConfig
 from sesamutils.flask import serve
 
+external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 
-server = Flask(__name__)
+app = dash.Dash(__name__, external_stylesheets=external_stylesheets,routes_pathname_prefix='/dash/')
+app.config.update({
+                'requests_pathname_prefix': '/dash/',
+                'routes_pathname_prefix': '/dash/'
+                })
+server = app.server
 logger = sesam_logger('insight', app=server, timestamp=True)
 
 # Default values can be given to optional environment variables by the use of tuples
@@ -27,6 +40,42 @@ if not config.validate():
 JWT = config.JWT
 URL = config.URL
 HEADER = {'Authorization': f'Bearer {JWT}'}
+
+app.layout = html.Div([
+    dcc.Tabs(id="tabs", value='node', children=[
+        dcc.Tab(label='Node info', value='node'),
+        dcc.Tab(label='Systems', value='systems'),
+        dcc.Tab(label='Pipes', value='pipes'),
+        dcc.Tab(label='Entities', value='entities')
+    ]),
+    html.Div(id='tabs-content')
+])
+
+def getNodeInfo():
+    resp_api = requests.get(URL)
+    return resp_api.json()
+
+def getSystemsData():
+    url_systems = URL+f"systems"
+    resp_systems = requests.get(url_systems,headers=HEADER)
+    return pd.json_normalize(resp_systems.json())
+
+def getPipesData():
+    url_pipes = URL+f"pipes"
+    resp_pipes = requests.get(url_pipes,headers=HEADER)
+    return pd.json_normalize(resp_pipes.json())
+
+def getEntities(pipeId):
+    url_entities = URL+f"pipes/{pipeId}/entities?limit=10"
+    resp_entities = requests.get(url_entities,headers=HEADER)
+    return pd.json_normalize(resp_entities.json())
+
+def generateTable(df):
+    return dash_table.DataTable(style_table={'maxHeight': '300px','overflowY': 'scroll'},
+                    style_cell={'textAlign': 'left'},
+                    id='table',
+                    columns=[{"name": f'{i} ({j})', "id": i} for i,j in zip(df.columns, df.dtypes)],
+                    data=df.to_dict('records'))
 
 def cell_len(x):
     if isinstance(x,str) or isinstance(x,list):
@@ -86,6 +135,42 @@ def post_flaten():
     data = pd.json_normalize(payload,sep='~')
     return Response(data.to_json(orient="records"), mimetype='application/json; charset=utf-8')
 
+@app.callback(Output('tabs-content', 'children'),[Input('tabs', 'value')])
+def render_content(tab):
+    data = list()
+    if tab == "node":
+        node_data = getNodeInfo()
+        return html.Div([
+            html.Pre(json.dumps(node_data,indent=4))
+                        ])
+    if tab == "systems":
+        systems_data = getSystemsData()
+        systems_count = systems_data.groupby("config.effective.type")['_id'].count()
+        data = [{'labels': list(systems_count.index),'values': list(systems_count),'type': 'pie'}]
+        return html.Div([
+            dcc.Graph(id='graph',figure={'data': data,'layout': {'margin': {'l': 30,'r': 0,'b': 30,'t': 30}}}),
+            generateTable(systems_data)
+                        ])
+    if tab == "pipes":
+        pipes_data = getPipesData()
+        pipes_count = pipes_data.groupby("config.original.source.type")._id.count()
+        data = [{'labels': list(pipes_count.index),'values': list(pipes_count),'type': 'pie'}]
+        return html.Div([
+            dcc.Graph(id='graph',figure={'data': data,'layout': {'margin': {'l': 30,'r': 0,'b': 30,'t': 30}}}),
+            generateTable(pipes_data[pipes_data.columns.to_list()[0:6]])
+            ])
+    if tab == "entities":
+        node_entities = getEntities("test-rest-brreg-naeringskode")
+        df_tmp = node_entities.copy()
+        map_tmp = list(map(lambda s:list(str.split(s,'.')),list(df_tmp.columns)))
+        map_tmp = pd.DataFrame(map_tmp).fillna('')
+        df_tmp.columns = pd.MultiIndex.from_frame(map_tmp)
+        df_tmp_str_stat = df_tmp.applymap(cell_len).describe(include="all").T
+        df_tmp_str_stat['type'] =[type(c).__name__ for c in df_tmp.iloc[0]]
+        return html.Div([
+            html.Iframe(srcDoc=pd.DataFrame(df_tmp_str_stat).to_html(),style={"width":"100%","height": "600"}, height=600)
+                        ])
+
 
 if __name__ == "__main__":
-    serve(server)
+    serve(server,config={"debug": True})
