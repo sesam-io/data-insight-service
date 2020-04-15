@@ -18,28 +18,33 @@ from requests.exceptions import Timeout
 from sesamutils import sesam_logger, VariablesConfig
 from sesamutils.flask import serve
 
+# Default values can be given to optional environment variables by the use of tuples
+required_env_vars = ["JWT", "HUBNR","SYS_ID"]
+optional_env_vars = [("LOG_LEVEL", "INFO"),("LOCAL_DEV","False")] 
+config = VariablesConfig(required_env_vars, optional_env_vars=optional_env_vars)
+
+SYS_ID = config.SYS_ID
+PROXY = '/'
+if config.LOCAL_DEV == 'True':
+    PROXY = '/'
+else:
+    PROXY = f'/api/systems/{SYS_ID}/proxy/'
+JWT = config.JWT
+URL = f'https://datahub-{config.HUBNR}.sesam.cloud/api/'
+HEADER = {'Authorization': f'Bearer {JWT}'}
+
 external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 
-app = dash.Dash(__name__, external_stylesheets=external_stylesheets,routes_pathname_prefix='/dash/')
-app.config.update({
-                'requests_pathname_prefix': '/dash/',
-                'routes_pathname_prefix': '/dash/'
-                })
-server = app.server
-logger = sesam_logger('insight', app=server, timestamp=True)
+app = dash.Dash(__name__, external_stylesheets=external_stylesheets,requests_pathname_prefix=PROXY,
+                routes_pathname_prefix='/')
 
-# Default values can be given to optional environment variables by the use of tuples
-required_env_vars = ["JWT", "URL"]
-optional_env_vars = [("LOG_LEVEL", "INFO")] 
-config = VariablesConfig(required_env_vars, optional_env_vars=optional_env_vars)
+server = app.server
+
+logger = sesam_logger('insight', app=server, timestamp=True)
     
 if not config.validate():
     logger.error("Environment variables do not validate. Exiting system.")
     os.sys.exit(1)
-
-JWT = config.JWT
-URL = config.URL
-HEADER = {'Authorization': f'Bearer {JWT}'}
 
 app.layout = html.Div([
     dcc.Tabs(id="tabs", value='node', children=[
@@ -94,16 +99,17 @@ def stream_as_json(generator_function):
         yield json.dumps(item)
     yield ']'
 
-@server.route("/",methods=["GET"]) 
+@server.route("/test/",methods=["GET"]) 
 def get_url():
     try:
         if request.args.get('since') is None:
-            logger.debug(f"since value not set")
+            logger.debug(f"since value not set. "+str(request.url))
         else:
             unix_time_update_date = request.args.get('since')
             logger.debug(f"since value sent from sesam: {unix_time_update_date}")
         with requests.Session() as session: # For streaming with generator
             session.headers.update(HEADER)
+            logger.debug("URL: "+URL)
             resp = session.get(URL, timeout=180)
             data = [{"data": resp.json()}]
             logger.debug(resp.json())
@@ -116,7 +122,7 @@ def get_url():
     except Exception as e:
         logger.error(f"Issue while fetching {e}")
 
-@server.route("/stats",methods=["POST"]) 
+@server.route("/stats/",methods=["POST"]) 
 def post_stats():
     payload = request.json
     data = pd.json_normalize(payload)
@@ -129,8 +135,8 @@ def post_stats():
     logger.debug(f'post_stats: {data_stat.to_json(orient="index")}')
     return Response('[\n'+data_stat.to_json(orient="index")+'\n]', mimetype='application/json; charset=utf-8')
 
-@server.route("/flaten",methods=["POST"]) 
-def post_flaten():
+@server.route("/flatten/",methods=["POST"]) 
+def post_flatten():
     payload = request.json
     data = pd.json_normalize(payload,sep='~')
     return Response(data.to_json(orient="records"), mimetype='application/json; charset=utf-8')

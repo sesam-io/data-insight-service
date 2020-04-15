@@ -6,6 +6,8 @@ services:
     ports:
       - "5000:5000"
     environment:
-      URL:  ${DEV_URL}/
+      HUBNR:  ${HUBNR}
       LOG_LEVEL: "DEBUG"
       JWT: ${JWT}
+      SYS_ID: "insight"
+      LOCAL_DEV: "True"
